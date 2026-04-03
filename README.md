@@ -16,13 +16,14 @@
 你的导师毕业了，带走了所有的经验和上下文？<br>
 你的搭档转岗了，熟悉的默契一夜之间归零？<br>
 你的前任交接了，三页文档想概括三年的积累？<br>
+**或者你想给自己做一个数字分身，让 AI 用你的方式工作？**
 
 **将冰冷的离别化为温暖的 Skill，欢迎加入赛博永生！**
 
 <br>
 
-提供同事的原材料（飞书消息、钉钉文档、邮件、截图）加上你的主观描述<br>
-生成一个**真正能替他工作的 AI Skill**<br>
+提供同事（或你自己）的原材料（飞书消息、钉钉文档、如流聊天记录、邮件、截图）加上主观描述<br>
+生成一个**真正能替他（或你）工作的 AI Skill**<br>
 用他的技术规范写代码，用他的语气回答问题，知道他什么时候会甩锅
 
 [数据来源](#支持的数据来源) · [安装](#安装) · [使用](#使用) · [效果示例](#效果示例) · [详细安装说明](INSTALL.md) · [**English**](README_EN.md)
@@ -55,6 +56,7 @@
 |------|:-------:|:-----------:|:-------:|------|
 | 飞书（自动采集） | ✅ API | ✅ | ✅ | 输入姓名即可，全自动 |
 | 钉钉（自动采集） | ⚠️ 浏览器 | ✅ | ✅ | 钉钉 API 不支持历史消息 |
+| 如流/百度 IM（Webhook + 导出） | ✅ Webhook | — | — | Webhook 实时采集或导出文件解析 |
 | Slack（自动采集） | ✅ API | — | — | 需管理员安装 Bot；免费版限 90 天 |
 | 微信聊天记录 | ✅ SQLite | — | — | 目前测试下来不太稳定，推荐先用下方开源工具代替 |
 | PDF | — | ✅ | — | 手动上传 |
@@ -117,7 +119,9 @@ pip3 install -r requirements.txt
 /create-colleague
 ```
 
-按提示输入同事姓名、公司职级（如 `字节 2-1 算法工程师`）、性格标签，然后选择数据来源。所有字段均可跳过，仅凭描述也能生成。
+按提示选择蒸馏模式（蒸馏自己 / 蒸馏同事），输入姓名、公司职级（如 `字节 2-1 算法工程师`）、性格标签，然后选择数据来源。所有字段均可跳过，仅凭描述也能生成。
+
+**蒸馏自己**：选择模式 1，系统会以第二人称引导你描述自己，支持从如流等聊天记录推断性格。
 
 完成后用 `/{slug}` 调用该同事 Skill。
 
@@ -195,7 +199,7 @@ pip3 install -r requirements.txt
 create-colleague/
 ├── SKILL.md              # skill 入口（官方 frontmatter）
 ├── prompts/              # Prompt 模板
-│   ├── intake.md         #   对话式信息录入
+│   ├── intake.md         #   对话式信息录入（支持蒸馏自己/同事两种模式）
 │   ├── work_analyzer.md  #   工作能力提取
 │   ├── persona_analyzer.md #  性格行为提取（含标签翻译表）
 │   ├── work_builder.md   #   work.md 生成模板
@@ -208,6 +212,8 @@ create-colleague/
 │   ├── feishu_mcp_client.py      # 飞书 MCP 方案
 │   ├── dingtalk_auto_collector.py # 钉钉全自动采集
 │   ├── slack_auto_collector.py   # Slack 全自动采集
+│   ├── ruliu_auto_collector.py   # 如流 Webhook 采集 + 导出解析
+│   ├── ruliu_parser.py           # 如流聊天记录解析
 │   ├── email_parser.py           # 邮件解析
 │   ├── skill_writer.py           # Skill 文件管理
 │   └── version_manager.py        # 版本存档与回滚

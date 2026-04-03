@@ -1,6 +1,6 @@
 ---
 name: create-colleague
-description: "Distill a colleague into an AI Skill. Auto-collect Feishu/DingTalk data, generate Work Skill + Persona, with continuous evolution. | 把同事蒸馏成 AI Skill，自动采集飞书/钉钉数据，生成 Work + Persona，支持持续进化。"
+description: "Distill yourself or a colleague into an AI Skill. Auto-collect Feishu/DingTalk/Ruliu data, generate Work Skill + Persona, with continuous evolution. | 把自己或同事蒸馏成 AI Skill，自动采集飞书/钉钉/如流数据，生成 Work + Persona，支持持续进化。"
 argument-hint: "[colleague-name-or-slug]"
 version: "1.0.0"
 user-invocable: true
@@ -19,7 +19,9 @@ allowed-tools: Read, Write, Edit, Bash
 - `/create-colleague`
 - "帮我创建一个同事 skill"
 - "我想蒸馏一个同事"
+- "我想蒸馏自己"
 - "新建同事"
+- "复制自己"
 - "给我做一个 XX 的 skill"
 
 当用户对已有同事 Skill 说以下内容时，进入进化模式：
@@ -46,6 +48,8 @@ allowed-tools: Read, Write, Edit, Bash
 | 飞书文档（MCP App Token） | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/feishu_mcp_client.py` |
 | 钉钉全自动采集 | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/dingtalk_auto_collector.py` |
 | 解析邮件 .eml/.mbox | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/email_parser.py` |
+| 如流 Webhook 采集 | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py` |
+| 解析如流聊天记录导出 | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_parser.py` |
 | 写入/更新 Skill 文件 | `Write` / `Edit` 工具 |
 | 版本管理 | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/version_manager.py` |
 | 列出已有 Skill | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/skill_writer.py --action list` |
@@ -56,6 +60,24 @@ allowed-tools: Read, Write, Edit, Bash
 ---
 
 ## 主流程：创建新同事 Skill
+
+### Step 0：蒸馏模式选择
+
+在开始前先询问：
+```
+你想创建谁的 Skill？
+
+  [1] 蒸馏自己（我要复制我自己）
+  [2] 蒸馏同事（创建一个同事的 Skill）
+```
+
+记录 `mode = self | colleague`，后续 Step 1 问题措辞根据模式调整（参考 `${CLAUDE_SKILL_DIR}/prompts/intake.md`）。
+
+**蒸馏自己模式的差异**：
+- Q1 花名 → "给自己的数字分身起个名字"
+- Q2 基本信息 → "描述你自己的基本信息"
+- Q3 性格画像 → "描述你自己的性格（别人怎么看你？你觉得自己是什么样的人？）"（可跳过，从聊天记录推断）
+- 分析时数据更全面（既有自己发的消息也有别人的回复）
 
 ### Step 1：基础信息录入（3 个问题）
 
@@ -91,6 +113,13 @@ allowed-tools: Read, Write, Edit, Bash
 
   [E] 直接粘贴内容
       把文字复制进来
+
+  [F] 如流采集
+      方式1：Webhook 实时采集（推荐，持续收集消息）
+      方式2：上传如流聊天记录导出文件
+
+  [G] 如流链接/粘贴
+      直接粘贴如流聊天记录文本
 
 可以混用，也可以跳过（仅凭手动信息生成）。
 ```
@@ -240,6 +269,70 @@ python3 ${CLAUDE_SKILL_DIR}/tools/dingtalk_auto_collector.py \
 - `knowledge/{slug}/messages.txt`
 
 如消息采集失败，提示用户截图聊天记录后上传。
+
+---
+
+#### 方式 F：如流采集
+
+如流没有公开的消息历史 API，通过两种方式采集：
+
+**方式 F1：Webhook 实时采集（推荐，持续收集）**
+
+首次使用需配置：
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py --setup
+```
+
+启动 Webhook 接收服务：
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py --start-server --port 8765
+```
+
+启动后将回调 URL（`http://你的IP:8765/webhook`）配置到如流群机器人的 Webhook 地址中。
+服务会实时接收群消息并写入 `messages_live.jsonl`。
+
+采集一段时间后，导出为标准格式：
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py --export \
+  --target "{name}" \
+  --output-dir ./knowledge/{slug}
+```
+
+停止服务：
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py --stop
+```
+
+**方式 F2：上传如流聊天记录导出文件**
+
+用户从如流客户端导出聊天记录（TXT/JSON），然后解析：
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py --parse-file {path} \
+  --target "{name}" \
+  --output-dir ./knowledge/{slug}
+```
+
+或直接用解析器：
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_parser.py --file {path} --target "{name}" --output /tmp/ruliu_out.txt
+```
+然后 `Read /tmp/ruliu_out.txt`
+
+采集完成后用 `Read` 读取输出目录下的文件：
+- `knowledge/{slug}/messages.txt` → 消息记录
+- `knowledge/{slug}/collection_summary.json` → 采集摘要
+
+常见问题排查：
+- Flask 未安装：`pip3 install flask`（Webhook 服务依赖）
+- Webhook 不通：检查防火墙、端口、内网穿透配置
+- 签名验证失败：确认如流机器人签名密钥与配置一致
+- 消息为空：确认已将机器人添加到目标群聊，且群内有新消息
+
+---
+
+#### 方式 G：如流链接/粘贴
+
+用户直接粘贴如流聊天记录文本，无需调用任何工具，直接作为文本原材料使用。
 
 ---
 
@@ -519,7 +612,9 @@ Activate when the user says any of the following:
 - `/create-colleague`
 - "Help me create a colleague skill"
 - "I want to distill a colleague"
+- "I want to distill myself"
 - "New colleague"
+- "Clone myself"
 - "Make a skill for XX"
 
 Enter evolution mode when the user says:
@@ -546,6 +641,8 @@ This Skill runs in the Claude Code environment with the following tools:
 | Feishu docs (MCP App Token) | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/feishu_mcp_client.py` |
 | DingTalk auto-collect | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/dingtalk_auto_collector.py` |
 | Parse email .eml/.mbox | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/email_parser.py` |
+| Ruliu (Baidu IM) Webhook collect | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py` |
+| Parse Ruliu chat export | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_parser.py` |
 | Write/update Skill files | `Write` / `Edit` tool |
 | Version management | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/version_manager.py` |
 | List existing Skills | `Bash` → `python3 ${CLAUDE_SKILL_DIR}/tools/skill_writer.py --action list` |
@@ -556,6 +653,24 @@ For a global path, use `--base-dir ~/.openclaw/workspace/skills/colleagues`.
 ---
 
 ## Main Flow: Create a New Colleague Skill
+
+### Step 0: Mode Selection
+
+Ask before starting:
+```
+Whose Skill would you like to create?
+
+  [1] Distill Myself (clone my own work style)
+  [2] Distill a Colleague (create a colleague's Skill)
+```
+
+Record `mode = self | colleague`. Adjust Step 1 question phrasing based on mode (refer to `${CLAUDE_SKILL_DIR}/prompts/intake.md`).
+
+**Self-distillation differences**:
+- Q1 Alias → "Pick a name for your digital twin"
+- Q2 Basic info → "Describe your own basic info"
+- Q3 Personality → "Describe your own personality (how do others see you?)" (can skip, infer from chat logs)
+- During analysis: data is more comprehensive (both your messages and others' replies)
 
 ### Step 1: Basic Info Collection (3 questions)
 
@@ -591,6 +706,13 @@ How would you like to provide source materials?
 
   [E] Paste Text
       Copy-paste text directly
+
+  [F] Ruliu (Baidu IM) Collect
+      Option 1: Webhook real-time collection (recommended, continuous)
+      Option 2: Upload Ruliu chat export file
+
+  [G] Ruliu Paste
+      Paste Ruliu chat text directly
 
 Can mix and match, or skip entirely (generate from manual info only).
 ```
@@ -740,6 +862,70 @@ After collection, `Read`:
 - `knowledge/{slug}/messages.txt`
 
 If message collection fails, prompt user to upload chat screenshots.
+
+---
+
+#### Option F: Ruliu (Baidu IM) Collect
+
+Ruliu has no public message history API. Two collection methods:
+
+**Option F1: Webhook Real-time Collection (recommended, continuous)**
+
+First-time setup:
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py --setup
+```
+
+Start Webhook receiver:
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py --start-server --port 8765
+```
+
+Configure the callback URL (`http://your-IP:8765/webhook`) in the Ruliu group bot's Webhook settings.
+The service receives messages in real-time and writes to `messages_live.jsonl`.
+
+After collecting for a period, export to standard format:
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py --export \
+  --target "{name}" \
+  --output-dir ./knowledge/{slug}
+```
+
+Stop the service:
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py --stop
+```
+
+**Option F2: Upload Ruliu Chat Export File**
+
+User exports chat history from Ruliu client (TXT/JSON), then parse:
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_auto_collector.py --parse-file {path} \
+  --target "{name}" \
+  --output-dir ./knowledge/{slug}
+```
+
+Or use the parser directly:
+```bash
+python3 ${CLAUDE_SKILL_DIR}/tools/ruliu_parser.py --file {path} --target "{name}" --output /tmp/ruliu_out.txt
+```
+Then `Read /tmp/ruliu_out.txt`
+
+After collection, `Read` the output files:
+- `knowledge/{slug}/messages.txt` → messages
+- `knowledge/{slug}/collection_summary.json` → collection summary
+
+Troubleshooting:
+- Flask not installed: `pip3 install flask` (required for Webhook server)
+- Webhook not reachable: check firewall, port, NAT/tunnel config
+- Signature verification failed: confirm Ruliu bot secret matches config
+- No messages: confirm bot is added to target group and new messages exist
+
+---
+
+#### Option G: Ruliu Paste
+
+User-pasted Ruliu chat text is used directly as material. No tools needed.
 
 ---
 
